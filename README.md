@@ -12,18 +12,22 @@ So I decided to create my own DXF to TABLES to SVG converter in pure Javascript 
 
 API
 ----
-todo
+todo very soon
 
 Usage
 -----
 see dxf2tbl2svg.xhtml ... select local DXF file to convert ... everything else is automated.
+
+Full featured usage example:
+todo very soon
 
 Case Study which used this converter:
 http://213.151.245.228/TERIX/ZBM/uM_CaseStudy_eng.xhtml
 
 TODO
 ----
-todo
+todo a lot of improvements of DXF analyze
+
 
 (WIP Work In Progress)
 
