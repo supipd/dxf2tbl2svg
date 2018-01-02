@@ -6,9 +6,9 @@ that's why they were not directly readable in SVG code and DOM elements.
 
 Dashed lines were converted to SVG paths too, that's why they lost precision of start and end points.
 
-After trying to convert DXF to SVG by C++ suorce code repository DXF2SVG, I had a lot of problems with debugging.
+After trying to convert DXF to SVG by C++ source code repository DXF2SVG, I had a lot of problems with debugging.
 
-So I decided to create my own DXF to TABLES to SVG converter in pure Javascript ... and here is.
+So I decided to create my own DXF to TABLES to SVG converter in pure Javascript (so higly debuggable) ... and here is.
 
 API
 ----
