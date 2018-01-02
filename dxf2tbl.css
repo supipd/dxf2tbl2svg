@@ -1,0 +1,157 @@
+/* <style> */
+
+    body, html {
+      font-family: arial, sans-serif;
+      font-size: 11pt;
+    }
+	
+	canvas {
+		background-color: black;
+		cursor:crosshair;
+	}
+
+/* https://www.html5rocks.com/en/tutorials/file/dndfiles/	*/
+#progress_bar {
+	margin: 10px 0;
+	padding: 3px;
+	border: 1px solid #000;
+	font-size: 14px;
+	clear: both;
+	opacity: 0;
+	-moz-transition: opacity 1s linear;
+	-o-transition: opacity 1s linear;
+	-webkit-transition: opacity 1s linear;
+}
+#progress_bar.loading {
+	opacity: 1.0;
+}
+#progress_bar .percent {
+	background-color: #99ccff;
+	height: auto;
+	width: 0;
+}
+/* */
+ 
+.anal_div {
+	float: left;
+    border: 1px solid;
+	/*max-*/ width: 24.8%;
+	height: 99%;
+}
+.anal_head {
+	height: 45px;
+	background-color: aqua;
+}
+.anal_head input[name=idx]{
+	width: 60px;
+}
+.anal_head input[name=cnt]{
+	width: 40px;
+}
+.anal_head input[name=findcode]{
+	width: 30px;
+}
+.anal_head input[name=findvalue]{
+	width: 70px;
+}
+.anal_head input[type=button]{
+	float: right;
+}
+.anal_head select{
+	width: 150px; /* 100% */
+}
+	
+.DXFtable {
+	height: calc( 100% - 45px);
+    overflow: auto;
+}
+.DXFtable div>b {
+    width: 50px;
+    display: inline-block;
+}
+.DXFtable div span:first-of-type {
+    display: inline-block;
+    width: 80px;
+    border: 1px solid;
+}
+/* special */
+#sections_ENTITIES .DXFtable div span:first-of-type,
+#drawer_missing .DXFtable div span:first-of-type {
+    width: 35px;
+}
+.DXFtable div span.t	/* :has(> textarea) */ { 
+    display: inline-block;
+	width: 100%;
+}
+.DXFtable span.t>* /* textarea */ {
+	width: 98%;
+	word-wrap: break-word;
+	background-color: antiquewhite;
+}
+/* </style> */
+
+/* <style> */
+.pen1 { stroke-width: 1px; }
+g#dxf2svg { stroke: black; fill: none; }	
+
+div#selektor_DXF {
+    position: absolute;
+    left: 20%;
+    top: 20px;
+    width: 330px;
+    height: 400px;
+    overflow: auto;
+    background-color: yellow;
+}
+div#selektor_DXF span.label{
+	display: inline-block;
+	width: 50px;
+}
+
+div#selektor_DXF_layer {
+    position: absolute;
+    left: 10px;
+    top: 40px;
+    width: 100px;
+    height: 300px;
+    overflow: auto;
+    background-color: lightgreen;
+}
+div#selektor_DXF_layer ul{
+}
+div#selektor_DXF_layer ul span{
+}
+
+/* </style> */
+
+/* <style> */
+g#lg_segments {
+	stroke: red;
+	stroke-width: 3;
+	stroke-opacity: 0.3;
+	marker-start: url(#markerCircle);
+    marker-end: url(#markerArrow);
+}
+line.ItoE {
+	stroke: yellow;
+}
+line.AtoX {
+	stroke: cyan;
+}
+line.DtoX {
+	stroke: blue;
+}
+line.BtoX {
+	stroke: lightgreen;
+}
+line.CtoX {
+	stroke: green;
+}
+line.distS {
+	stroke: magenta;
+}
+line.distE {
+	stroke: darkmagenta;
+}
+/* </style> */
+

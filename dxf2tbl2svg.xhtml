@@ -1,0 +1,28 @@
+<html 
+	xmlns="http://www.w3.org/1999/xhtml" 
+	xmlns:svg="http://www.w3.org/2000/svg"
+	xmlns:xlink="http://www.w3.org/1999/xlink" 
+	>
+<head>
+	<title>DXF2TBL test</title>
+	<script type="text/javascript" src="dxf2tbl2svg.js"></script>
+	<link rel="stylesheet" href="dxf2tbl.css" type="text/css"/>
+</head>
+<body onload="localFileReader.init();">
+<div>
+		<input id="DXFfileName" type="file" name="DXFfileName"/>
+		<button onclick="localFileReader.abortRead();">Cancel read</button>
+		<div id="progress_bar"><div class="percent">0%</div></div>
+</div>
+<div id="DXF_SVG_canvas" >
+<svg xmlns="http://www.w3.org/2000/svg" 
+	xmlns:svg="http://www.w3.org/2000/svg" 
+	xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" 
+	height="100%" version="1.1" 
+>		
+	<g id="dxf2svg" class="pen1">
+	</g>
+</svg>	
+		</div>
+</body>
+</html>
