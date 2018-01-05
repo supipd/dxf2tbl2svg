@@ -19,7 +19,7 @@ Usage
 see dxf2tbl2svg.xhtml ... select local DXF file to convert ... everything else is automated.
 
 Full featured usage example:
-todo very soon
+http://www.sbmintegral.sk/TERIX/ZBM/DXF2TBL2SVG/dxf2tbl2svg_full.xhtml
 
 Case Study which used this converter:
 http://213.151.245.228/TERIX/ZBM/uM_CaseStudy_eng.xhtml

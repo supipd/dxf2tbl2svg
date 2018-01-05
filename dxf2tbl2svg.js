@@ -1,7 +1,15 @@
 ///<file name="dxf2tbl2svg.js" path="/.../dxf2tbl2svg.js" type="javascript">
 
+///<section name="auxiliary globals">
+///<variable name="DEBUG_LINE_NR"> helper DEBUG constant </variable>
 DEBUG_LINE_NR = 10000000;
+///<variable name="svgNS"> well known value </variable>
 var svgNS = "http://www.w3.org/2000/svg";
+///<variable name="Active_DXF2TBL"> last created instance of class DXF2TBL </variable>
+Active_DXF2TBL = null;
+///<variable name="Active_DXFdrawerSVG"> last created instance of class DXFdrawerSVG </variable>
+Active_DXFdrawerSVG = null;
+///</section>
 
 ///<section name="aliasLIBRARY" desc="LIBRARY fake aliases for autonomous functionality">
 if (typeof isDef == 'undefined') {
@@ -67,6 +75,7 @@ DXF2TBL = function( dxftxt ) {
 		return new DXF2TBL( dxftxt );
 	}
 	this.dxftxt = dxftxt || '';
+	Active_DXF2TBL = this;
 	return this.init();
 }
 ///</function>
@@ -206,13 +215,15 @@ if (i >= DEBUG_LINE_NR) {
 		this.a_ENTITIES	= [];	this.separate_arrays(this.sections.ENTITIES, this.a_ENTITIES,[0,100]);
 	}
 
-,	find_handle_in_array : function ( section, id, tag, item_name ) {
+,	find_handle_in_array : function ( section, id, tag, item_name, last_idx ) {
 		tag = tag || '5';	// default id
+		last_idx = parseInt(last_idx);
+		last_idx = isNaN(last_idx) ? -1 : Math.max(last_idx,-1);
 		var i,j, obj, keys
 		,	checker = new RegExp("^_(\\.([\\w\\d_]+))?\."+tag+"$","i")
 		,	matches
 		;
-		for(var i=0; i < section.length; i++) {
+		for(i=last_idx+1; i < section.length; i++) {
 			obj = section[i];
 			if (item_name && (obj._name_ != item_name)) {
 				continue;
@@ -233,17 +244,25 @@ if (i >= DEBUG_LINE_NR) {
 	}
 
 ,	make :  function( dxftxt, drawer, svg_callback ) {
-		drawer = drawer || DXFdrawerSVG(this);
-		this.dxftxt = dxftxt || this.dxftxt;
-		this.dxf_get_sections();    // read and parse DXF
-		this.separall_arrays();            // prepare analytics of DXF entities
+		var me = this
+		,	pxt = gID('pending_xslt_trafo')
+		;
+		if (pxt) { pxt.style.display=''; }
+		setTimeout(function() {	// to update DOM
+			drawer = drawer || Active_DXFdrawerSVG || DXFdrawerSVG(me);
+			me.drawer = drawer;
+			me.dxftxt = dxftxt || me.dxftxt;
+			me.dxf_get_sections();    // read and parse DXF
+			me.separall_arrays();            // prepare analytics of DXF entities
 
-		var svgG = drawer.prepare_svg();
-		return drawer.draw_entities( svgG, __, __, function() {    // draw SVG, and then call user callback
-			if (typeof svg_callback == 'function') {
-				svg_callback( svgG );
-			}
-		});  
+			var svgG = drawer.prepare_svg();
+			return drawer.draw_entities( svgG, __, __, function() {    // draw SVG, and then call user callback
+				if (pxt) { pxt.style.display='none'; }
+				if (typeof svg_callback == 'function') {
+					svg_callback( svgG );
+				}
+			});  
+		},1);
 	}
 }
 
@@ -273,9 +292,8 @@ DXFdrawerSVG = function( inst_DXF2TBL, cfg ) {
 	}
 	this.inst_DXF2TBL = inst_DXF2TBL;
 	this.cfg = cfg || this.default_cfg;
-	this.layer_groups = {};
-	this.inserter_def = null;
-	this.missing = [];
+	this.init();
+	Active_DXFdrawerSVG = this;
 	return this;
 }
 ///</function>
@@ -287,25 +305,63 @@ DXFdrawerSVG = function( inst_DXF2TBL, cfg ) {
 ///<property name="layer_groups" type="Object"> layers descriptions </property>
 ///<property name="inserter_def" type="Object"> actual INSERT state </property>
 ///<property name="missing" type="Array"> list of unknown entity drawers </property>
+
+///<property name="svg_min_x" type="Number"> SVG dimensioning </property>
+///<property name="svg_max_x" type="Number"> SVG dimensioning </property>
+///<property name="svg_min_y" type="Number"> SVG dimensioning </property>
+///<property name="svg_max_y" type="Number"> SVG dimensioning </property>
+
 ///</instance>
 
 ///<prototype name="DXF2TBL">
 DXFdrawerSVG.prototype = {
 	default_cfg : {
-		holder : null
-	,	svgG_gID : 'g#dxf2svg'
+		svgG_gID : 'g#dxf2svg'
 	,	svgG : null
 		
-	,	clip_min_x :  -572500.0	//648000;	//-100000000.0;
-	,	clip_max_x :  -562500.0	//659000;	//100000000.0;
-	,	clip_min_y : -1225000.0	//1223000;	//-100000000.0;
-	,	clip_max_y : -1217000.0	//1232000;	//100000000.0;
-	,	clip_min_z : -100000000.0
+	,	clip_min_x : 0	//-572500.0
+	,	clip_max_x : 100000000.0	//-562500.0
+	,	clip_min_y : 0	//-1225000.0
+	,	clip_max_y : 100000000.0	//-1217000.0
+	,	clip_min_z : 0
 	,	clip_max_z : 100000000.0	
 	
 	,	DECS_M : 1000
 	}
-,	log_in_console : function ( section_mark, idx, ent_name ) {
+,	init : function() {
+		this.layer_groups = {};
+		this.inserter_def = null;
+		this.missing = [];
+		
+		this.svg_min_x = 100000000.0;
+		this.svg_max_x = -100000000.0;
+		this.svg_min_y = 100000000.0;
+		this.svg_max_y = -100000000.0;
+	}
+,	set_cfg : function( cfgORform ) {
+		var cfg = this.default_cfg
+		,	keys = Object.keys(cfg);
+		;
+		if (cfgORform instanceof HTMLFormElement) {
+			var frme = cfgORform.elements;
+			keys.forEach( function(v) {
+				if (isDef(frme[v])) {
+					cfg[v] = (frme[v].type=='number') 
+						? parseFloat(frme[v].value) 
+						: frme[v].value
+					;
+				}
+			})
+		} else {
+			keys.forEach( function(v) {
+				if (isDef(cfgORform[v])) {
+					cfg[v] = cfgORform[v];
+				}
+			})
+		}
+		return( this.cfg = cfg );
+	}
+,	log_missing : function ( section_mark, idx, ent_name ) {
 				// save in format printable by print_section(drawer.missing)
 		this.missing.push({	gcode:idx, value: section_mark+': '+ ent_name	});
 		console.log('Missing ['+ent_name+']'+' at '+section_mark+' index : '+idx );
@@ -322,13 +378,40 @@ DXFdrawerSVG.prototype = {
 		}
 	}
 	
-,	rounder : function ( num ) {
-		return isNaN(num) ? num : Math.round( num * this.cfg.DECS_M ) / this.cfg.DECS_M; 
+,	rounder : function ( num, chck ) {
+		var val = isNaN(num) ? num : Math.round( num * this.cfg.DECS_M ) / this.cfg.DECS_M; 
+		switch(chck) {
+			case 'x' : 
+				this.svg_min_x = Math.min(this.svg_min_x, val);
+				this.svg_max_x = Math.max(this.svg_max_x, val);
+				break;
+			case 'y' : 
+				this.svg_min_y = Math.min(this.svg_min_y, val);
+				this.svg_max_y = Math.max(this.svg_max_y, val);
+				break;
+		}
+		return val;
 	}
 ,	ensureArr : function (a) {
 		return isArr(a) ? a : [a];
 	}
-
+//	structureENT(ent,[{n:'AcDbEntity',t:[8]},{n:'AcDbLine',t:[19,11,20,21]}])
+,	structureENT : function(ent, desc) {	// [{n:name, t:[tags]}, ..., {n:name, t:[tags]}]
+		desc.forEach( function(v) {
+			var name = v.n
+			,	tags = v.t
+			;
+			if (! ent[name]) {
+				ent[name] = {};
+				tags.forEach( function(t) {
+					ent[name][t] = ent[t];
+					delete ent[t];
+				});
+			}
+		});
+		return ent;
+	}
+	
 ,	layer : function(layer, parent) {
 		var lg = this.layer_groups
 		,	le = Object.keys(lg).length
@@ -362,13 +445,17 @@ parent = this.holder;
 		return src;
 	}
 ,	POINT : function(ent, parent, referer) {
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDbPoint', t:[10,20] }
+		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
 		,	lg = this.layer(layer,parent)
 		,	layid = lg ? lg.id : 'plain'
-		,	cx = this.rounder( parseFloat(ent.AcDbPoint['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) )
-		,	cy = this.rounder( - ( parseFloat(ent.AcDbPoint['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) )
+		,	cx = this.rounder( parseFloat(ent.AcDbPoint['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	cy = this.rounder( - ( parseFloat(ent.AcDbPoint['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
 		,	r = 0.1
 		,	src = '<circle id="'+ iid +'" class="pen1 l_'+layid+'" cx="'+cx+'" cy="'+cy+'" r="'+r+'"'
 				+' data-drawer="POINT"'
@@ -399,13 +486,17 @@ parent = this.holder;
 		return src;
 	}
 ,	CIRCLE : function(ent, parent, referer) {
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDbCircle', t:[10,20,40] }
+		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
 		,	lg = this.layer(layer,parent)
 		,	layid = lg ? lg.id : 'plain'
-		,	cx = this.rounder( parseFloat(ent.AcDbCircle['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) )
-		,	cy = this.rounder( - ( parseFloat(ent.AcDbCircle['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) )
+		,	cx = this.rounder( parseFloat(ent.AcDbCircle['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	cy = this.rounder( - ( parseFloat(ent.AcDbCircle['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
 // 50	start angle		
 // 51	end angle		
 		,	r = this.rounder( parseFloat(ent.AcDbCircle['40']) )
@@ -439,15 +530,19 @@ parent = this.holder;
 	}
 //	,	ELLIPSE :	TODO
 ,	LINE : function(ent, parent, referer) {
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDbLine', t:[10,11,20,21] }
+		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
 		,	lg = this.layer(layer,parent)
 		,	layid = lg ? lg.id : 'plain'
-		,	x1 = this.rounder( parseFloat(ent.AcDbLine['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) )
-		,	x2 = this.rounder( parseFloat(ent.AcDbLine['11']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) )
-		,	y1 = this.rounder( - ( parseFloat(ent.AcDbLine['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) )
-		,	y2 = this.rounder( - ( parseFloat(ent.AcDbLine['21']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) )
+		,	x1 = this.rounder( parseFloat(ent.AcDbLine['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	x2 = this.rounder( parseFloat(ent.AcDbLine['11']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	y1 = this.rounder( - ( parseFloat(ent.AcDbLine['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
+		,	y2 = this.rounder( - ( parseFloat(ent.AcDbLine['21']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
 		,	src = '<line id="'+ iid +'" class="pen1 l_'+layid+'" x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'"'
 				+' data-drawer="LINE"'
 				+(referer ? ' data_referer="'+referer+'"' : '')
@@ -477,8 +572,144 @@ parent = this.holder;
 		}
 		return src;
 	}
-//	,	POLYLINE : TODO from subsequent VERTEX-es
+,	POLYLINE : function(ent, parent, referer) {	//TODO from subsequent VERTEX-es
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDb2dPolyline', t:[10,20,30] }
+		]);
+		var id = '_'+ent['5']
+		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + "pl_"+id
+		,	layer = ent.AcDbEntity['8']
+		,	lg = this.layer(layer,parent)
+		,	layid = lg ? lg.id : 'plain'
+		,	pline_flag = ent.AcDb2dPolyline['70']
+		,		closed = pline_flag && (pline_flag & 1)
+		,		Plinegen = pline_flag && (pline_flag & 128)
+		,	gpar = lg && lg.g || parent
+		;
+		this.polyline_def = {
+			id : iid
+		,	pline_flag : pline_flag
+		,	closed : closed
+		,	Plinegen : Plinegen
+		,	x : this.rounder( parseFloat(ent.AcDb2dPolyline['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	y : this.rounder( - ( parseFloat(ent.AcDb2dPolyline['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
+	//	,	z : this.rounder( - ( parseFloat(ent.AcDb2dPolyline['30']) +(this.inserter_def ? this.inserter_def.z :0) - (referer ? 0 : this.cfg.clip_min_z) ) )
+		,	referer : referer
+		,	layer : layer
+		,	layid : layid
+		,	lg : lg
+		,	gpar : gpar
+		,	vertexes : []
+		};
+		return '';
+	}
+,	VERTEX : function(ent, parent, referer) {
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDb2dVertex', t:[10,20,42] }
+		]);
+		var id = '_'+ent.AcDbEntity['5']
+		,	iid = (this.polyline_def ? this.polyline_def.id+"_" : "") + id
+		,	layer = ent.AcDbEntity['8']
+		,	lg = this.layer(layer,parent)
+		,	layid = lg ? lg.id : 'plain'
+		,	x = this.rounder( parseFloat(ent.AcDb2dVertex['10']) +(this.polyline_def ? this.polyline_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	y = this.rounder( - ( parseFloat(ent.AcDb2dVertex['20']) +(this.polyline_def ? this.polyline_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
+		,	bulgeA = parseFloat(ent.AcDb2dVertex['42'])
+		,	bulge = isNaN(bulgeA) ? 0 : bulgeA
+		;
+		this.polyline_def.vertexes.push({
+			x: x
+		,	y: y
+		,	bulge: bulge
+		});
+		return '';
+	}
+//	http://www.lee-mac.com/bulgeconversion.html
+,	_bulgeToArc : function(vrtx1, vrtx2) {
+		var p1 = { x:vrtx1.x, y:vrtx1.y }
+		,	p2 = { x:vrtx2.x, y:vrtx2.y }
+		,	bulge = vrtx1.bulge
+		;
+/*
+;; Bulge to Arc  -  Lee Mac
+;; p1 - start vertex
+;; p2 - end vertex
+;; b  - bulge
+;; Returns: (<center> <start angle> <end angle> <radius>)
+
+(defun LM:Bulge->Arc ( p1 p2 b / a c r )
+    (setq a (* 2 (atan b))
+          r (/ (distance p1 p2) 2 (sin a))
+          c (polar p1 (+ (- (/ pi 2) a) (angle p1 p2)) r)
+    )
+    (if (minusp b)
+        (list c (angle c p2) (angle c p1) (abs r))
+        (list c (angle c p1) (angle c p2) (abs r))
+    )
+)
+*/
+/*		bulge = b = tan( FI / 4 )
+		angle = FI = 4 * arctan( b )
+				d = r * sin( FI / 2 )
+		radius = r = d / sin( FI / 2 )
+*/
+		var angle = 4 * Math.atan(bulge)
+		,	d = Math.sqrt( (p2.x - p1.x)*(p2.x - p1.x) + (p2.y - p1.y)*(p2.y - p1.y) )
+		,	r = d / 2 / Math.sin( angle / 2 )
+		;
+		return 'A '+r+','+r+' 0, 0,0, '+vrtx2.x+','+vrtx2.y;
+	}
+,	_polyline_gen : function( def ) {
+		def = def || this.polyline_def;
+		var d="";
+		if (def.closed) {
+			def.vertexes.push(def.vertexes[0]);
+		}
+		for (var i=0; i<def.vertexes.length - 1; i++) {
+			var vrtx1 = def.vertexes[i]
+			,	vrtx2 = def.vertexes[i+1]
+			;
+			if (i==0) {
+				d+="M "+vrtx1.x+','+vrtx1.y;
+			}
+			if (vrtx1.bulge) {
+				d+= this._bulgeToArc(vrtx1, vrtx2);
+			} else {
+				d+= (i>0) ? ' L '+vrtx2.x+','+vrtx2.y : '';
+			}
+		}
+		var	src = '<path id="'+ def.id +'" class="pen1 l_'+def.layid+'" d="'+ d +'"'
+				+' data-drawer="POLYLINE"'
+				+(def.referer ? ' data_referer="'+def.referer+'"' : '')
+				+(this.inserter_def ? ' data-inserter="'+this.inserter_def.id+'"' : '')
+				+'/>'
+		;
+		if (def.lg) {
+			this.layer_groups[def.layer].src.push(src);
+		}
+		if (def.gpar) {
+			var s = def.gpar.ownerDocument.createElementNS(svgNS,'path');
+			s.setAttribute('data-drawer','POLYLINE');
+			s.setAttribute('d',d);
+			s.setAttribute('class',"pen1 l_"+def.layid);
+			s.setAttribute('id',def.id);
+			if (def.referer) {
+				s.setAttribute('data-referef',def.referer);
+			}
+			if (this.inserter_def) {
+				s.setAttribute('data-inserter',this.inserter_def.id);
+			}
+			def.gpar.appendChild(s);
+		}
+		return src;
+	}
 ,	LWPOLYLINE : function(ent, parent, referer) {
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDbPolyline', t:[10,20,70,43,40,41,75,90] }
+		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
@@ -496,8 +727,8 @@ parent = this.holder;
 		,	gen_path = function() { 
 				var d="", x,y;
 				for(var i=0; i<num_vertices; i++) {
-					x = me.rounder( parseFloat(ent.AcDbPolyline['10'][i]) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) );
-					y = me.rounder( - ( parseFloat(ent.AcDbPolyline['20'][i]) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) );
+					x = me.rounder( parseFloat(ent.AcDbPolyline['10'][i]) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x');
+					y = me.rounder( - ( parseFloat(ent.AcDbPolyline['20'][i]) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y');
 					d+= (i?'L ':'M ')+x+' '+y+' ';
 				}
 				return d;
@@ -531,6 +762,11 @@ parent = this.holder;
 	}
 //	,	TRACE :	TODO 4-point polygon
 ,	ARC : function(ent, parent, referer) {
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDbCircle', t:[10,20,40] }
+		,	{ n:'AcDbArc', t:[50,51] }
+		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
@@ -543,14 +779,15 @@ parent = this.holder;
 		,	start_angle = (360 - dsa) % 360
 		,	dea = parseFloat(ent.AcDbArc['51'])
 		,	end_angle = (360 - dea) % 360
+		,	me = this
 		,	gen_path = function() {
 				var start_point = {
-						x: cx + r * Math.cos(start_angle * Math.PI/180)
-					,	y: cy + r * Math.sin(start_angle * Math.PI/180)
+						x: me.rounder(cx + r * Math.cos(start_angle * Math.PI/180), 'x')
+					,	y: me.rounder(cy + r * Math.sin(start_angle * Math.PI/180), 'y')
 					}
 				,	end_point = {
-						x: cx + r * Math.cos(end_angle * Math.PI/180)
-					,	y: cy + r * Math.sin(end_angle * Math.PI/180)
+						x: me.rounder(cx + r * Math.cos(end_angle * Math.PI/180), 'x')
+					,	y: me.rounder(cy + r * Math.sin(end_angle * Math.PI/180), 'y')
 					}
 				;
 				return 'M '+ start_point.x +' '+ start_point.y
@@ -591,8 +828,61 @@ parent = this.holder;
 		return src;
 	}
 //,	SPLINE : TODO 
+,	SOLID : function(ent, parent, referer) {
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDbTrace', t:[10,11,12,13,20,21,22,23] }
+		]);
+		var id = '_'+ent['5']
+		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
+		,	layer = ent.AcDbEntity['8']
+		,	lg = this.layer(layer,parent)
+		,	layid = lg ? lg.id : 'plain'
+		,	num_vertices = isDef(ent.AcDbTrace['13']) ? 4 : 3
+		,	me = this
+		,	gen_path = function() { 
+				var d="", x,y;
+				for(var i=0; i<num_vertices; i++) {
+					x = me.rounder( parseFloat(ent.AcDbTrace['1'+i]) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x');
+					y = me.rounder( - ( parseFloat(ent.AcDbTrace['2'+i]) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y');
+					d+= (i?'L ':'M ')+x+' '+y+' ';
+				}
+				return d+' Z';
+			}
+		,	d = gen_path()
+		,	src = '<path id="'+ iid +'" class="pen1 l_'+layid+'" d="'+ d +'" fill="url(#solidFill)"'
+				+' data-drawer="SOLID"'
+				+(referer ? ' data_referer="'+referer+'"' : '')
+				+(this.inserter_def ? ' data-inserter="'+this.inserter_def.id+'"' : '')
+				+'/>'
+		,	gpar = lg && lg.g || parent
+		;
+		if (lg) {
+			this.layer_groups[layer].src.push(src);
+		}
+		if (gpar) {
+			var s = gpar.ownerDocument.createElementNS(svgNS,'path');
+			s.setAttribute('data-drawer','SOLID');
+			s.setAttribute('d',d);
+			s.setAttribute('class',"pen1 l_"+layid);
+			s.setAttribute('id',iid);
+			s.setAttribute('fill',"url(#solidFill)");
+			if (referer) {
+				s.setAttribute('data-referef',referer);
+			}
+			if (this.inserter_def) {
+				s.setAttribute('data-inserter',this.inserter_def.id);
+			}
+			gpar.appendChild(s);
+		}
+		return src;
+	}
 ,	HATCH : function(ent, parent, referer) {	// provisorium only line edges !
 //	https://www.autodesk.com/techpubs/autocad/acad2000/dxf/boundary_path_data_dxf_06.htm
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDbHatch', t:[10,11,20,21,70,72,91,92,93] }
+		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
@@ -624,8 +914,8 @@ parent = this.holder;
 					;
 					i72+= isPolyline ? 1:0;
 					for(var i=0, dd=""; i < edges; i++) {
-						x = me.rounder( parseFloat(ent.AcDbHatch['10'][iXY+i]) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) );
-						y = me.rounder( - ( parseFloat(ent.AcDbHatch['20'][iXY+i]) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) );
+						x = me.rounder( parseFloat(ent.AcDbHatch['10'][iXY+i]) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x');
+						y = me.rounder( - ( parseFloat(ent.AcDbHatch['20'][iXY+i]) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y');
 						if (isPolyline) {
 							dd+= (firstM ? 'M ':'L ')+x+' '+y+' ';
 						} else {
@@ -701,6 +991,10 @@ parent = this.holder;
 		return t;
 	}
 ,	TEXT : function(ent, parent, referer, overw) {
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDbText', t:[1,7,10,20,40,50] }
+		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
@@ -711,10 +1005,10 @@ parent = this.holder;
 		,	e_AcDbText = isArr(ent.AcDbText) ? ent.AcDbText[0] : ent.AcDbText
 		,	x = this.rounder( parseFloat(e_AcDbText['10']) 
 				+(	(! isAttrib && this.inserter_def) ? this.inserter_def.x :0) 
-				- (referer ? 0 : this.cfg.clip_min_x) )
+				- (referer ? 0 : this.cfg.clip_min_x) , 'x')
 		,	y = this.rounder( - ( parseFloat(e_AcDbText['20']) 
 				+(	(! isAttrib && this.inserter_def) ? this.inserter_def.y :0) 
-				- (referer ? 0 : this.cfg.clip_min_y) ) )
+				- (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
 		,	h = parseFloat(e_AcDbText['40'])
 		,	angle = (360 - parseFloat(e_AcDbText['50'] || 0) )
 		,	t = this._textFormat(e_AcDbText['1'])
@@ -757,16 +1051,88 @@ parent = this.holder;
 		}
 		return src;
 	}
-//	,	MTEXT : TODO multiline text '1' base text string, '3' text string concatenation
+,	MTEXT : function(ent, parent, referer) {	// http://dxfwrite.readthedocs.io/en/latest/entities/mtext.html 
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDbMText', t:[1,3,7,10,20,40,50] }
+		]);
+		var id = '_'+ent['5']
+		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
+		,	layer = ent.AcDbEntity['8']
+		,	lg = this.layer(layer,parent)
+		,	layid = lg ? lg.id : 'plain'
+		
+		,	x = this.rounder( parseFloat(ent.AcDbMText['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	y = this.rounder( - ( parseFloat(ent.AcDbMText['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
+		,	h = parseFloat(ent.AcDbMText['40'])
+		,	angle = (360 - parseFloat(ent.AcDbMText['50'] || 0) )
+		,	me = this
+		,	gen_texts = function( h ) {
+				var chunks = [ent.AcDbMText['1']].concat(
+						ent.AcDbMText['3'] ? me.ensureArr(ent.AcDbMText['3']) : []
+					)
+				,	t = chunks.join('')
+				,	rows = t.split(/[\r\n]/g)
+				,	ih=""
+				;
+				for(var i=0; i<rows.length; i++) {
+					ih+='<tspan dx="0" dy="'+(i*h)+'">'+rows[i]+'</tspan>';
+				}
+				return ih;
+			}
+		,	t = gen_texts( h )	//_textFormat(AcDbMText['1'])
+		,	f = ent.AcDbMText['7'] || 'arial'	// = STANDART
+		,	gen_transform = function() {
+				return angle ?  ('rotate('+angle+','+x+','+y+')') : '';
+			}
+		,	trans = gen_transform()
+		,	src = '<text id="'+ iid +'" class="pen1 l_'+layid+'" x="'+x+'" y="'+y
+				+'" font-size="'+h+'px" '
+				+ (angle ? ('transform="'+trans+'" ') : '') 
+				+' data-drawer="MTEXT"'
+				+(referer ? ' data_referer="'+referer+'"' : '')
+				+(this.inserter_def ? ' data-inserter="'+this.inserter_def.id+'"' : '')
+				+'>'+ t + '</text>'
+		,	gpar = lg && lg.g || parent
+		;
+		if (lg) {
+			this.layer_groups[layer].src.push(src);
+		}
+		if (gpar) {
+			var s = gpar.ownerDocument.createElementNS(svgNS,'text');
+			s.setAttribute('data-drawer', 'MTEXT');
+			s.setAttribute('x',x);
+			s.setAttribute('y',y);
+			s.setAttribute('font-size',h+'px');
+			if (trans) {
+				s.setAttribute('transform',trans);
+			}
+			s.setAttribute('class',"pen1 l_"+layid);
+			s.setAttribute('id',iid);
+			s.innerHTML = t;	//appendChild(s.ownerDocument.createTextNode(t));
+			if (referer) {
+				s.setAttribute('data-referef',referer);
+			}
+			if (this.inserter_def) {
+				s.setAttribute('data-inserter',this.inserter_def.id);
+			}
+			gpar.appendChild(s);
+		}
+		return src;
+	}
 ,	ATTDEF : function(ent, parent, referer) {	return '';	}
 ,	ATTRIB : function(ent, parent, referer) {
 		if (referer) {
-this.log_in_console('blok ATTRIB', ent._line_+'/'+ent._idx_, ent._name_ );
+this.log_missing('blok ATTRIB', ent._line_+'/'+ent._idx_, ent._name_ );
 		}
 		return this.TEXT(ent, parent, referer, 'ATTRIB');
 	}
 //	,	DIMENSION : TODO? 
 ,	INSERT : function(ent, parent, referer) {
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDbBlockReference', t:[2,10,20,41,42,43,50] }
+		]);
 		var id = '_'+ent['5']
 		,	layer = ent.AcDbEntity['8']
 		,	lg = this.layer(layer,parent)
@@ -808,28 +1174,28 @@ this.log_in_console('blok ATTRIB', ent._line_+'/'+ent._idx_, ent._name_ );
 				if (this[ent._name_]) {
 					src+="\n"+this[ent._name_](ent, parent, block_name);
 				} else {
-this.log_in_console(/*'a_BLOCKS'*/'BLK', i, ent._name_ );
+this.log_missing(/*'a_BLOCKS'*/'BLK', i, ent._name_ );
 				}
 				ent = a_BLOCKS[++i];
 			} 
 		} else {
-this.log_in_console(/*'a_BLOCKS'*/'BLK name:', i, /*'Unknown BLOCK name '+*/block_name );
+this.log_missing(/*'a_BLOCKS'*/'BLK name:', i, /*'Unknown BLOCK name '+*/block_name );
 		}
 		return src;
 	}
 
-// draw_entities( gID('g#dxf2svg') );
 ,	draw_entities : function ( holder, start, cnt, callback ) {
 		var a_ENTITIES = this.inst_DXF2TBL.a_ENTITIES
-		this.layer_groups = {};
+		this.init();
 		
 		start = start || 0;
 		cnt = cnt || (a_ENTITIES.length - start);
 		var src = ''
 		,	spz	
 		,	is_INSERT = false
+		,	is_POLYLINE = false
 		;
-		holder = holder || this.cfg.holder;
+		this.holder = holder || this.cfg.svgG;
 
 		for(var i=start; i<start+cnt; i++) {
 			var ent = a_ENTITIES[i];
@@ -843,18 +1209,48 @@ this.log_in_console(/*'a_BLOCKS'*/'BLK name:', i, /*'Unknown BLOCK name '+*/bloc
 			if (ent._name_ == 'INSERT') {
 				is_INSERT = true;
 			}
+	// ---		// ---
+			if (is_POLYLINE) {
+				if ((ent._name_ == 'SEQEND') || (ent._name_ != 'VERTEX')) { 
+					src+="\n"+this._polyline_gen(this.polyline_def);					
+					this.polyline_def = null;
+					is_POLYLINE = false;
+				}
+			}
+			if (ent._name_ == 'POLYLINE') {
+				is_POLYLINE = true;
+			}
 	// ---		
 			if (this[ent._name_]) {
-				src+="\n"+this[ent._name_](ent, holder);
+				src+="\n"+this[ent._name_](ent, this.holder);
 			} else {
-this.log_in_console(/*'a_ENTITIES'*/'ENT', i, ent._name_);
+this.log_missing(/*'a_ENTITIES'*/'ENT', i, ent._name_);
 			}
 		}
-		if (holder && (typeof SVGpzr != 'undefined') ) {
-			spz = SVGpzr(holder);
+		if (this.holder) {
+			var svgcko = this.holder.ownerSVGElement;
+			this.holder.removeAttribute('transform');
+	//		if (! svgcko.getAttribute('viewBox')) {
+				var wi = (this.svg_max_x - this.svg_min_x)
+				,	he = (this.svg_max_y - this.svg_min_y)
+				;
+				svgcko.setAttribute('viewBox',''
+					+ ( this.svg_min_x - wi/10 ) + ' '
+					+ ( this.svg_min_y - he/10 ) + ' '
+					+ ( wi + 2 * wi/10 ) + ' '
+					+ ( he + 2 * he/10 )
+				);
+	//		}
+			if (typeof UI != 'udefined') {
+				UI.Body.resize(this.holder);
+				UI.Layout.moveToFront(this.holder);
+			}
+			if (typeof SVGpzr != 'undefined') {
+				spz = SVGpzr(this.holder);
+			}
 		}
 		if (typeof callback == 'function') {
-			callback(holder, spz);
+			callback(this.holder, spz);
 		}
 		return src;
 	}
@@ -889,29 +1285,18 @@ this.log_in_console(/*'a_ENTITIES'*/'ENT', i, ent._name_);
 //			</svg>	
 //		</div>
 */
-		svgG = this.cfg.svgG || gID('g#dxf2svg');
+		svgG = svgG || this.cfg.svgG || gID(this.cfg.svgG_gID);
 		if (svgG) {
 			svgG.innerSVG = '';        // clean SVG space
-			var svgcko = svgG.ownerSVGElement;
-			if (! svgcko.getAttribute('viewBox')) {
-				var wi = (this.cfg.clip_max_x - this.cfg.clip_min_x)
-				,	he = (this.cfg.clip_max_y - this.cfg.clip_min_y)
-				;
-				svgcko.setAttribute('viewBox',''
-					+ ( - wi/10 ) + ' '
-					+ ( - he/10 ) + ' '
-					+ ( wi + 2 * wi/10 ) + ' '
-					+ ( he + 2 * he/10 )
-				);
-			}
 		}
 		return svgG;
 	}
-,	check_id_uniquity : function ( svg ) {	// helper ... tester ID correct generation ... TODO solution
+,	check_id_uniquity : function ( svgG ) {	// helper ... tester ID correct generation ... TODO solution
+		svgG = svgG || this.cfg.svgG || gID(this.cfg.svgG_gID);
 		var ids = {}
 		,	nuIds = {}
 		;
-		svg.queryXpath('.//@id', function(o) {
+		svgG.queryXpath('.//@id', function(o) {
 			var id = o.textContent;
 			if (isDef(ids[id])) {
 				nuIds[id]= (nuIds[id] ? ++nuIds[id] : 2);
@@ -920,13 +1305,13 @@ this.log_in_console(/*'a_ENTITIES'*/'ENT', i, ent._name_);
 			}
 		});
 		Object.keys(nuIds).forEach(function(v){
-			console.log(svg.querySelectorAll('#'+v));
+			console.log(svgG.querySelectorAll('#'+v));
 		})
 	}
 
-//	saveDXFSVG( 'g#dxf2svg', 'my_dxf2svg.svg' );
+//	saveDXFSVG( gID('g#dxf2svg'), 'my_dxf2svg.svg' );
 ,	saveDXFSVG : function ( svgG, filename ) {
-		svgG = svgG || this.cfg.svgG || gID('g#dxf2svg');
+		svgG = svgG || this.cfg.svgG || gID(this.cfg.svgG_gID);
 		filename = filename || 'dxf2svg.svg';
 		var svgcko = svgG && svgG.ownerSVGElement
 		,	svgtxt = ''
@@ -940,6 +1325,9 @@ this.log_in_console(/*'a_ENTITIES'*/'ENT', i, ent._name_);
 			if (typeof saveTextAsFile != 'undefined') {
 				saveTextAsFile(svgtxt, filename); 
 			}
+			if (typeof SVGpzr != 'undefined') {
+				SVGpzr(svgcko); 
+			}
 		}
 		return svgtxt;
 	}
@@ -947,266 +1335,6 @@ this.log_in_console(/*'a_ENTITIES'*/'ENT', i, ent._name_);
 }
 
 ///</class> <!--  name="DXFdrawerSVG" -->
-
-///</section>
-
-///<section name="FileReader">
-/// using FileReader API for local file upload
-/// (for test page purposes)
-localFileReader = {
-	reader : null
-,	progress : null
-,	init : function() {
-		this.progress = document.querySelector('#progress_bar .percent');
-		document.getElementById('DXFfileName').addEventListener('change', function(evt) {
-			localFileReader.handleFileSelect(evt);
-		}, false);
-	}
-,	abortRead : function () {
-		this.reader.abort();
-	}
-,	errorHandler : function (evt) {
-		switch(evt.target.error.code) {
-			case evt.target.error.NOT_FOUND_ERR:
-				alert('File Not Found!');
-				break;
-			case evt.target.error.NOT_READABLE_ERR:
-				alert('File is not readable');
-				break;
-			case evt.target.error.ABORT_ERR:
-				break; // noop
-			default:
-				alert('An error occurred reading this file.');
-		};
-	}
-,	updateProgress : function (evt) {	// evt is an ProgressEvent.
-		if (evt.lengthComputable) {
-			var percentLoaded = Math.round((evt.loaded / evt.total) * 100);
-			// Increase the progress bar length.
-			if (percentLoaded < 100) {
-				this.progress.style.width = percentLoaded + '%';
-				this.progress.textContent = percentLoaded + '%';
-			}
-		}
-	}
-,	handleFileSelect : function (evt) {
-		var me = this;
-	// Reset progress indicator on new file selection.
-		this.progress.style.width = '0%';
-		this.progress.textContent = '0%';
-
-		this.reader = new FileReader();
-		this.reader.onerror = function(evt) {
-			me.errorHandler(evt);
-		}
-		this.reader.onprogress = function(evt) {
-			me.updateProgress(evt);
-		}
-		this.reader.onabort = function(e) {
-			alert('File read cancelled');
-		};
-		this.reader.onloadstart = function(e) {
-			document.getElementById('progress_bar').className = 'loading';
-		};
-		this.reader.onload = function(e) {
-			// Ensure that the progress bar displays 100% at the end.
-			me.progress.style.width = '100%';
-			me.progress.textContent = '100%';
-			setTimeout( function() {
-				document.getElementById('progress_bar').className='';
-			}, 2000);
-			DXF2TBL().make( e.target.result)
-		}
-		// Read in the image file as a text.
-		this.reader.readAsText(evt.target.files[0]);
-	}
-}
-
-///<section name="UI">
-/// UI functionality strictly dependant on LIBRARY not explicitly needed 
-///	for TARGET DXF 2 TBL 2 SVG conversion
-/// only for presentation pages with specific XHTML structure
-///<dependancies>
-///	loadman([
-///		'/LIBRARY/UI/UI_forms.css'
-///	,	'/LIBRARY/UI/UI_forms.js'
-///	,	'/LIBRARY/GETSET/getset.js'
-///	,	'/LIBRARY/TIMING/timeManager.js'
-///	,	"/LIBRARY/MODULES/BUTTON/onoffbutton.js"
-///	,	"/hbp/MAPS/Zahorie/dxf2tbl.js"
-///	,	'/LIBRARY/SVGDOM/SVGpzr.js'
-///	,	'/UTILITY/JSONeditor/JSONeditor.xhtc'
-///	]);
-///</dependancies>
-
-function print_section( tuplelist, idt, start, count ) {
-	idt = idt || 'Dt_1';
-	var elDiv = gID('div#'+idt)	//gID('div.DXFtable')
-	,	ih = ""
-	,	le = tuplelist.length
-	;
-	start = parseFloat(start) || 0;
-	count = parseFloat(count) || le - start;
-	for(var i = start; i < Math.min(le, start+count); i++) {
-		var txt = isDef(tuplelist[i].gcode) 
-			? '<span>'+tuplelist[i].gcode+'</span><span>'+tuplelist[i].value+'</span>'
-			: '<span>'+tuplelist[i]._name_+'</span><span class="t"><div><![CDATA['
-				+ JSON.stringify(tuplelist[i]) +']]></div></span>'
-		;
-		ih += '<div><b>'+i+'</b>'+ txt +'</div>';
-	}
-	if (elDiv) {
-		elDiv.innerHTML = ih;
-	}
-	return ih;
-}
-function gen_DXF_selektors( svg, force ) {
-	var tb = svg.rgID('table tbody')
-	if (!force && tb && tb.childElementCount >1 ) {
-		return;
-	}
-	var gids = svg.queryXpath('./s:g[@id="dxf2svg"]/s:g[starts-with(@id,"lg_")]')
-	,	sel = svg.rgID('div#selektor_DXF select')
-	,	tblb = svg.rgID('div#selektor_DXF table tbody')
-	,	templ = tblb && tblb.firstElementChild
-	;
-	if (!gids) {
-		return;
-	}
-	if (sel) {
-		sel.innerHTML = '';
-		for (var i=0; i<gids.length; i++) {
-			var opt = new Option( gids[i].id );
-			sel.options.add(opt);
-		}
-	}
-	if (tblb) {
-		tblb.innerHTML = '';
-		tblb.appendChild(templ);
-		for (var i=0; i<gids.length; i++) {
-			var tr = templ.cloneNode(true);
-			tr.querySelector('span.label').textContent = gids[i].id;
-			tr.querySelector('span.description').textContent = gids[i].getAttribute('inkscape:label');
-			tblb.appendChild(tr);
-		}
-	}
-}
-function handle_DXF_gid (evt) {
-	var chck = evt.target;
-	if (chck.type=='checkbox') {
-		var c = chck.checked
-		,	tr = chck.parentNode
-		,	tbody = tr.parentNode
-		,	svg = chck.rtgID('svg')
-		;
-		if (tr === tbody.firstElementChild) {	//(id=='Vsetko')
-			var chks = tbody.querySelectorAll('input[type=checkbox]');
-		} else {
-			chks = [chck];
-		}
-		for (var i=0; i<chks.length; i++) {
-			var	id = chks[i].nextElementSibling.textContent
-			,	g = svg.querySelector('g[id="'+id+'"]')
-			;
-			chks[i].checked = c;
-			if (g) {
-				g.style.display = c ? '' : 'none';
-			}
-		}
-	}
-}
-function handle_DXF_layer( evt, what ) {
-	var el = (evt instanceof Event) ? evt.target : evt
-	,	nm = el && el.nodeName.toLowerCase()
-	,	svg = el.rtgID('svg')
-	;
-	if (! svg) {
-		return;
-	}
-	switch(what) {
-		case 'gen':
-			var	le = el.parentNode.querySelector('span.label')
-			,	de = el.parentNode.querySelector('span.description')
-			,	chck = el.parentNode.querySelector('input[type=checkbox]')
-			;
-			if (chck && chck.checked && (nm == 'span') && le && de) {
-				var id = le.textContent
-				,	div = el.rtgID('#selektor_DXF_layer')
-				,	txts = svg.querySelectorAll('g[id="'+id+'"] text')
-				;
-				for(var i=0, ih=''; i<txts.length; i++) {
-					ih+='<li><span>'+txts[i].textContent+'</span></li>'
-				}
-				if (div) {
-					div.querySelector('h4 span.label').textContent = id;
-					div.querySelector('h4 span.description').textContent = de.textContent;
-					div.querySelector('ul').innerHTML = ih;
-					div.style.display = '';
-				}
-			}
-			break;
-		case 'sel':
-			var txt = el.textContent
-			,	le = el.rgID('span.label')
-			,	de = el.rgID('span.description')
-			,	sel = svg.queryXpath(".//s:g[@id='"+le.textContent+"']//s:text[.='"+txt+"']",__,1)
-			;
-			if (sel) {
-				SVGpzr(sel).el_centerAt(sel);
-			}
-			break;
-	}
-}
-function handle_DXFtable(evt) {
-	var el = (evt instanceof Event) ? evt.target : evt
-	,	jE = gID('#JSONeditor_div')
-	;
-	if (el.firstChild.nodeType == Node.CDATA_SECTION_NODE) {
-		if (jE) {
-			JSONeditor.binder.load(el.firstChild.textContent);
-			UI.Layout.moveToFront(jE);
-		}
-	}
-}
-function handle_SVG_info (frm) {
-	frm = frm || gID('form#svg_info_form');
-	var findSections = document.forms.findSections
-	,	findEntities = document.forms.findEntities
-	,	findBlocks = document.forms.findBlocks
-	,	frme = frm.elements
-	,	idm = /^_(.*)/.exec(frme.evTargetId.value)
-	,	data = JSON5.parseOr(frme.evTargetData.value, null)
-	;
-	if (idm) {
-		findSections.elements.sect_name.value = 'ENTITIES';
-		findSections.elements.findcode.value = 5;
-		findSections.elements.findvalue.value = idm[1];
-		aFireEvent(findSections.elements.doFind,'click');
-		if (! data.inserter) {
-			findEntities.elements.findcode.value = 5;
-			findEntities.elements.findvalue.value = idm[1];
-			aFireEvent(findEntities.elements.doFind,'click');
-		} else {
-			idm = /^_(.*)/.exec(data.inserter);
-			if (idm) {
-				findEntities.elements.findcode.value = 5;
-				findEntities.elements.findvalue.value = idm[1];
-				aFireEvent(findEntities.elements.doFind,'click');
-				var inserterObj = a_ENTITIES.find(function(v){
-						return v['5']==idm[1];
-					})
-				,	blockName = inserterObj && inserterObj.AcDbBlockReference['2']
-				;
-				if (blockName) {
-					findBlocks.elements.arr_name.value = 'a_BLOCKS';
-					findBlocks.elements.findcode.value = 2;
-					findBlocks.elements.findvalue.value = blockName;
-					aFireEvent(findBlocks.elements.doFind,'click');
-				}
-			}
-		}
-	}
-}
 
 ///</section>
 
