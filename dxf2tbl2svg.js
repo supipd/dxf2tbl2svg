@@ -20,6 +20,7 @@ if (typeof isDef == 'undefined') {
 	}
 	isDef = function(thing) { return (thing !== undefined); }
 	isArr = function(thing) { return Array.isArray ? Array.isArray(thing) : getType(thing) == "[object Array]"; }
+	isFnc = function(thing) { return getType(thing) == "[object Function]"; }
 }
 if (typeof gID == 'undefined') {
 	gID = function( query ) {
@@ -185,7 +186,9 @@ DXF2TBL.prototype = {
 		splitCodes = splitCodes || [0];
 		var section_list = section.list
 		,	section_offset = section.offset
-		,	objekt, primar
+		,	objekt, primar, geom
+		,	geoms = [10,11,12,13,	20,21,22,23,30,31,32,33, 40,41,42,43, 72]
+		,	obj_name
 		;
 		for(var i=0; i< section_list.length; i++) {	
 			var gv = section_list[i];
@@ -193,16 +196,33 @@ if (i >= DEBUG_LINE_NR) {
 	debugger;	
 }
 			if ( splitCodes.indexOf(gv.gcode) == -1 ) {
-				this.add_obj( objekt, gv.gcode, gv.value );
+				var ig = geoms.indexOf(gv.gcode);
+				if (ig > -1) {
+					if (ig < 4) {	// after every X create GEOM	10,11,12,13	
+						if ( ! objekt._GEOM ) {
+							objekt._GEOM = [];
+						}
+						objekt._GEOM.push({});
+						geom = objekt._GEOM[objekt._GEOM.length-1];
+					}
+					this.add_obj( geom, gv.gcode, gv.value );					
+				} else {
+					this.add_obj( objekt, gv.gcode, gv.value );
+				}
 			} else {
 				if (gv.gcode == 0) {
 					if (primar) {
 						outer.push(primar);
 					}
-					objekt = primar = { _name_: gv.value, _line_: section_offset + i, _idx_: i };
+					objekt = primar = { _name_: gv.value, _line_: section_offset + i, _idx_: i};
 				} else {
 					if (gv.gcode == 100) {
+						obj_name = gv.value;
 						objekt = primar;
+						if (isDef(DXFstructurer[obj_name])) {
+							i = this.sequencer(section, i, objekt, DXFstructurer[obj_name]);
+							continue;
+						}
 					}
 					objekt = this.add_obj( objekt, gv.value, {} );
 				}
@@ -210,11 +230,71 @@ if (i >= DEBUG_LINE_NR) {
 		}	
 		return outer;
 	}
+,	sequencer : function( section, i, primar, sequence ) {
+		var section_list = section.list, gv
+		,	objekt = primar
+		,	par, parents = []
+		,	finded = false, end = false
+		,	sd, seq = sequence, act_j = -1, last_j = 0, end_j = seq.length, dir_j = 1 // 1: up -1: down
+		,	up_down = function() {
+				act_j += dir_j;
+				if (dir_j == 1) {	// going up
+					if (act_j == end_j) {
+						end_j = -1; act_j = last_j; dir_j = -1;
+					}
+					return true;
+				}
+				if (dir_j == -1) {	//going down
+					return act_j != end_j;
+				}
+			}
+		;
+		while( !end ) {
+			gv = section_list[i]; finded = false;
+// gcodes are not alway ordered as in DXF reference, so logic to try:
+// go from actual [act_j] up to end of seq, if not finded,
+// go from actual [act_j] down to start of seq, if not finded 
+// go one level higher
+			//	for(var j=act_j; j<seq.length; j++) {
+			while( up_down() ) {	
+				sd = seq[act_j][gv.gcode];
+				if (isDef(sd)) {	// finded gcode
+					if (isDef(sd.fi)) {
+						if (! sd.fi(gv.value)) {
+							continue;
+						}
+					}
+					finded = true;
+					if ( ! isStr(sd) ) {	// structured variable
+						parents.push({o:objekt,s:seq, j:act_j});
+						objekt = this.add_obj( objekt, sd.n || gv.value, {} );
+						seq = sd.t; act_j = -1; last_j = 0;
+					} else {
+						last_j = act_j;
+					}
+					end_j = seq.length; dir_j = 1 // finded ... switch dir to UP
+					this.add_obj( objekt, gv.gcode, gv.value );
+					i++;
+					break;
+				}
+			}
+			if (finded) {
+				 continue;
+			}
+			if (parents.length) {
+				par = parents.pop(); objekt = par.o; 
+				seq = par.s; act_j = par.j-1; last_j = par.j; end_j = seq.length, dir_j = 1 // up
+				continue;
+			}
+			end = true;
+		} 
+		return i-1;	// last was not finded
+	}
 ,	separall_arrays : function () {
+		this.a_TABLES	= [];	this.separate_arrays(this.sections.TABLES, this.a_TABLES,[0,100]);
 		this.a_BLOCKS	= [];	this.separate_arrays(this.sections.BLOCKS, this.a_BLOCKS,[0,100]);
 		this.a_ENTITIES	= [];	this.separate_arrays(this.sections.ENTITIES, this.a_ENTITIES,[0,100]);
 	}
-
 ,	find_handle_in_array : function ( section, id, tag, item_name, last_idx ) {
 		tag = tag || '5';	// default id
 		last_idx = parseInt(last_idx);
@@ -318,6 +398,8 @@ DXFdrawerSVG.prototype = {
 	default_cfg : {
 		svgG_gID : 'g#dxf2svg'
 	,	svgG : null
+	,	svg_viewBox : ''
+	,	svg_bckColor : '#FFFFFF'
 		
 	,	clip_min_x : 0	//-572500.0
 	,	clip_max_x : 100000000.0	//-562500.0
@@ -447,15 +529,15 @@ parent = this.holder;
 ,	POINT : function(ent, parent, referer) {
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDbPoint', t:[10,20] }
+		,	{ n:'AcDbPoint', t:['_GEOM'] }	//t:[10,20] }
 		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
 		,	lg = this.layer(layer,parent)
 		,	layid = lg ? lg.id : 'plain'
-		,	cx = this.rounder( parseFloat(ent.AcDbPoint['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
-		,	cy = this.rounder( - ( parseFloat(ent.AcDbPoint['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
+		,	cx = this.rounder( parseFloat(ent.AcDbPoint._GEOM[0]['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	cy = this.rounder( - ( parseFloat(ent.AcDbPoint._GEOM[0]['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
 		,	r = 0.1
 		,	src = '<circle id="'+ iid +'" class="pen1 l_'+layid+'" cx="'+cx+'" cy="'+cy+'" r="'+r+'"'
 				+' data-drawer="POINT"'
@@ -488,18 +570,18 @@ parent = this.holder;
 ,	CIRCLE : function(ent, parent, referer) {
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDbCircle', t:[10,20,40] }
+		,	{ n:'AcDbCircle', t:['_GEOM'] }	//, t:[10,20,40] }
 		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
 		,	lg = this.layer(layer,parent)
 		,	layid = lg ? lg.id : 'plain'
-		,	cx = this.rounder( parseFloat(ent.AcDbCircle['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
-		,	cy = this.rounder( - ( parseFloat(ent.AcDbCircle['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
+		,	cx = this.rounder( parseFloat(ent.AcDbCircle._GEOM[0]['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	cy = this.rounder( - ( parseFloat(ent.AcDbCircle._GEOM[0]['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
 // 50	start angle		
 // 51	end angle		
-		,	r = this.rounder( parseFloat(ent.AcDbCircle['40']) )
+		,	r = this.rounder( parseFloat(ent.AcDbCircle._GEOM[0]['40']) )
 		,	src = '<circle id="'+ iid +'" class="pen1 l_'+layid+'" cx="'+cx+'" cy="'+cy+'" r="'+r+'"'
 				+' data-drawer="CIRCLE"'
 				+(referer ? ' data_referer="'+referer+'"' : '')
@@ -532,17 +614,17 @@ parent = this.holder;
 ,	LINE : function(ent, parent, referer) {
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDbLine', t:[10,11,20,21] }
+		,	{ n:'AcDbLine', t:['_GEOM'] }	//, t:[10,11,20,21] }
 		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
 		,	lg = this.layer(layer,parent)
 		,	layid = lg ? lg.id : 'plain'
-		,	x1 = this.rounder( parseFloat(ent.AcDbLine['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
-		,	x2 = this.rounder( parseFloat(ent.AcDbLine['11']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
-		,	y1 = this.rounder( - ( parseFloat(ent.AcDbLine['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
-		,	y2 = this.rounder( - ( parseFloat(ent.AcDbLine['21']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
+		,	x1 = this.rounder( parseFloat(ent.AcDbLine._GEOM[0]['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	x2 = this.rounder( parseFloat(ent.AcDbLine._GEOM[1]['11']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	y1 = this.rounder( - ( parseFloat(ent.AcDbLine._GEOM[0]['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
+		,	y2 = this.rounder( - ( parseFloat(ent.AcDbLine._GEOM[1]['21']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
 		,	src = '<line id="'+ iid +'" class="pen1 l_'+layid+'" x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'"'
 				+' data-drawer="LINE"'
 				+(referer ? ' data_referer="'+referer+'"' : '')
@@ -575,7 +657,7 @@ parent = this.holder;
 ,	POLYLINE : function(ent, parent, referer) {	//TODO from subsequent VERTEX-es
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDb2dPolyline', t:[10,20,30] }
+		,	{ n:'AcDb2dPolyline', t:['_GEOM',70] }	//, t:[10,20,30,70] }
 		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + "pl_"+id
@@ -592,9 +674,9 @@ parent = this.holder;
 		,	pline_flag : pline_flag
 		,	closed : closed
 		,	Plinegen : Plinegen
-		,	x : this.rounder( parseFloat(ent.AcDb2dPolyline['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
-		,	y : this.rounder( - ( parseFloat(ent.AcDb2dPolyline['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
-	//	,	z : this.rounder( - ( parseFloat(ent.AcDb2dPolyline['30']) +(this.inserter_def ? this.inserter_def.z :0) - (referer ? 0 : this.cfg.clip_min_z) ) )
+		,	x : this.rounder( parseFloat(ent.AcDb2dPolyline._GEOM[0]['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	y : this.rounder( - ( parseFloat(ent.AcDb2dPolyline._GEOM[0]['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
+	//	,	z : this.rounder( - ( parseFloat(ent.AcDb2dPolyline._GEOM[0]['30']) +(this.inserter_def ? this.inserter_def.z :0) - (referer ? 0 : this.cfg.clip_min_z) ) )
 		,	referer : referer
 		,	layer : layer
 		,	layid : layid
@@ -607,16 +689,16 @@ parent = this.holder;
 ,	VERTEX : function(ent, parent, referer) {
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDb2dVertex', t:[10,20,42] }
+		,	{ n:'AcDb2dVertex', t:['_GEOM'] }	//, t:[10,20,42] }
 		]);
 		var id = '_'+ent.AcDbEntity['5']
 		,	iid = (this.polyline_def ? this.polyline_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
 		,	lg = this.layer(layer,parent)
 		,	layid = lg ? lg.id : 'plain'
-		,	x = this.rounder( parseFloat(ent.AcDb2dVertex['10']) +(this.polyline_def ? this.polyline_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
-		,	y = this.rounder( - ( parseFloat(ent.AcDb2dVertex['20']) +(this.polyline_def ? this.polyline_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
-		,	bulgeA = parseFloat(ent.AcDb2dVertex['42'])
+		,	x = this.rounder( parseFloat(ent.AcDb2dVertex._GEOM[0]['10']) +(this.polyline_def ? this.polyline_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	y = this.rounder( - ( parseFloat(ent.AcDb2dVertex._GEOM[0]['20']) +(this.polyline_def ? this.polyline_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
+		,	bulgeA = parseFloat(ent.AcDb2dVertex._GEOM[0]['42'])
 		,	bulge = isNaN(bulgeA) ? 0 : bulgeA
 		;
 		this.polyline_def.vertexes.push({
@@ -658,8 +740,9 @@ parent = this.holder;
 		var angle = 4 * Math.atan(bulge)
 		,	d = Math.sqrt( (p2.x - p1.x)*(p2.x - p1.x) + (p2.y - p1.y)*(p2.y - p1.y) )
 		,	r = d / 2 / Math.sin( angle / 2 )
+		,	smer = (bulge < 0) ? 1 : 0
 		;
-		return 'A '+r+','+r+' 0, 0,0, '+vrtx2.x+','+vrtx2.y;
+		return ' A '+r+','+r+' 0, 0,'+smer+', '+vrtx2.x+','+vrtx2.y+' ';
 	}
 ,	_polyline_gen : function( def ) {
 		def = def || this.polyline_def;
@@ -677,7 +760,7 @@ parent = this.holder;
 			if (vrtx1.bulge) {
 				d+= this._bulgeToArc(vrtx1, vrtx2);
 			} else {
-				d+= (i>0) ? ' L '+vrtx2.x+','+vrtx2.y : '';
+				d+= ' L '+vrtx2.x+','+vrtx2.y ;
 			}
 		}
 		var	src = '<path id="'+ def.id +'" class="pen1 l_'+def.layid+'" d="'+ d +'"'
@@ -708,7 +791,7 @@ parent = this.holder;
 ,	LWPOLYLINE : function(ent, parent, referer) {
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDbPolyline', t:[10,20,70,43,40,41,75,90] }
+		,	{ n:'AcDbPolyline', t:['_GEOM',70,75,90] }	//, t:[10,20,70,43,40,41,75,90] }
 		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
@@ -718,17 +801,17 @@ parent = this.holder;
 		,	pline_flag = ent.AcDbPolyline['70']
 		,		closed = pline_flag && (pline_flag & 1)
 		,		Plinegen = pline_flag && (pline_flag & 128)
-		,	constant_width = ent.AcDbPolyline['43']
-		,	start_width = ent.AcDbPolyline['40']
-		,	end_width = ent.AcDbPolyline['41']
+		,	constant_width = ent.AcDbPolyline._GEOM[0]['43']
+		,	start_width = ent.AcDbPolyline._GEOM[0]['40']
+		,	end_width = ent.AcDbPolyline._GEOM[0]['41']
 		,	curves_flag = ent.AcDbPolyline['75']
 		,	num_vertices = parseFloat(ent.AcDbPolyline['90'])
 		,	me = this
 		,	gen_path = function() { 
 				var d="", x,y;
 				for(var i=0; i<num_vertices; i++) {
-					x = me.rounder( parseFloat(ent.AcDbPolyline['10'][i]) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x');
-					y = me.rounder( - ( parseFloat(ent.AcDbPolyline['20'][i]) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y');
+					x = me.rounder( parseFloat(ent.AcDbPolyline._GEOM[i]['10']) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x');
+					y = me.rounder( - ( parseFloat(ent.AcDbPolyline._GEOM[i]['20']) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y');
 					d+= (i?'L ':'M ')+x+' '+y+' ';
 				}
 				return d;
@@ -761,10 +844,34 @@ parent = this.holder;
 		return src;
 	}
 //	,	TRACE :	TODO 4-point polygon
+
+,	_gen_arc_path : function(cx,cy,rx,ry,dsa,dea,counterclockwise) {
+		var	start_angle = (360 - dsa) % 360	// 74 ... 286	//	359	... 1
+		,	end_angle = (360 - dea) % 360	// 87 ... 273	//	62	...	298
+		,	large = ( (dea < dsa ? 360:0) + dea - dsa) > 180 ? 1 : 0	//	273 - 286 = -13
+		,	r = rx	// TODO elliptic arc
+		,	start_point = {
+				x: this.rounder(cx + r * Math.cos(start_angle * Math.PI/180), 'x')
+			,	y: this.rounder(cy + r * Math.sin(start_angle * Math.PI/180), 'y')
+			}
+		,	end_point = {
+				x: this.rounder(cx + r * Math.cos(end_angle * Math.PI/180), 'x')
+			,	y: this.rounder(cy + r * Math.sin(end_angle * Math.PI/180), 'y')
+			}
+		;
+		return 'M '+ start_point.x +' '+ start_point.y
+			+ ' A '+rx+','+ry+' 0'	// For arc assume no x-axis rotation. 
+	//		+ ( ( (end_angle > start_angle) && (end_angle - start_angle > 180) )
+	//			? ' 1,0' : ' 0,0' )
+	//		+ ( (dea > dsa) ? ' 1,0' : ' 0,0' )
+			+ ' '+ large +',0'
+			+ ' '+ end_point.x +','+ end_point.y
+		;
+	}
 ,	ARC : function(ent, parent, referer) {
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDbCircle', t:[10,20,40] }
+		,	{ n:'AcDbCircle', t:['_GEOM'] }	//, t:[10,20,40] }
 		,	{ n:'AcDbArc', t:[50,51] }
 		]);
 		var id = '_'+ent['5']
@@ -772,33 +879,12 @@ parent = this.holder;
 		,	layer = ent.AcDbEntity['8']
 		,	lg = this.layer(layer,parent)
 		,	layid = lg ? lg.id : 'plain'
-		,	cx = this.rounder( parseFloat(ent.AcDbCircle['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) )
-		,	cy = this.rounder( - ( parseFloat(ent.AcDbCircle['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) )
-		,	r = this.rounder( parseFloat(ent.AcDbCircle['40']) )
+		,	cx = this.rounder( parseFloat(ent.AcDbCircle._GEOM[0]['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) )
+		,	cy = this.rounder( - ( parseFloat(ent.AcDbCircle._GEOM[0]['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) )
+		,	r = this.rounder( parseFloat(ent.AcDbCircle._GEOM[0]['40']) )
 		,	dsa = parseFloat(ent.AcDbArc['50'])
-		,	start_angle = (360 - dsa) % 360
 		,	dea = parseFloat(ent.AcDbArc['51'])
-		,	end_angle = (360 - dea) % 360
-		,	me = this
-		,	gen_path = function() {
-				var start_point = {
-						x: me.rounder(cx + r * Math.cos(start_angle * Math.PI/180), 'x')
-					,	y: me.rounder(cy + r * Math.sin(start_angle * Math.PI/180), 'y')
-					}
-				,	end_point = {
-						x: me.rounder(cx + r * Math.cos(end_angle * Math.PI/180), 'x')
-					,	y: me.rounder(cy + r * Math.sin(end_angle * Math.PI/180), 'y')
-					}
-				;
-				return 'M '+ start_point.x +' '+ start_point.y
-					+ ' A '+r+','+r+' 0'	// For arc assume no x-axis rotation. 
-			//		+ ( ( (end_angle > start_angle) && (end_angle - start_angle > 180) )
-			//			? ' 1,0' : ' 0,0' )
-					+ ( (dea > dsa) ? ' 1,0' : ' 0,0' )
-					+ ' '+ end_point.x +','+ end_point.y
-				;
-			}
-		,	d = gen_path()
+		,	d = this._gen_arc_path(cx,cy,r,r,dsa,dea)
 		,	src = '<path id="'+ iid +'" class="pen1 l_'+layid+'" d="'+ d +'"'
 				+' data-drawer="ARC"'
 				+(referer ? ' data_referer="'+referer+'"' : '')
@@ -831,20 +917,20 @@ parent = this.holder;
 ,	SOLID : function(ent, parent, referer) {
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDbTrace', t:[10,11,12,13,20,21,22,23] }
+		,	{ n:'AcDbTrace', t:['_GEOM'] }	//, t:[10,11,12,13,20,21,22,23] }
 		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
 		,	layer = ent.AcDbEntity['8']
 		,	lg = this.layer(layer,parent)
 		,	layid = lg ? lg.id : 'plain'
-		,	num_vertices = isDef(ent.AcDbTrace['13']) ? 4 : 3
+		,	num_vertices = ent.AcDbTrace._GEOM.length	//isDef(ent.AcDbTrace['13']) ? 4 : 3
 		,	me = this
 		,	gen_path = function() { 
 				var d="", x,y;
 				for(var i=0; i<num_vertices; i++) {
-					x = me.rounder( parseFloat(ent.AcDbTrace['1'+i]) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x');
-					y = me.rounder( - ( parseFloat(ent.AcDbTrace['2'+i]) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y');
+					x = me.rounder( parseFloat(ent.AcDbTrace._GEOM[i]['1'+i]) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x');
+					y = me.rounder( - ( parseFloat(ent.AcDbTrace._GEOM[i]['2'+i]) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y');
 					d+= (i?'L ':'M ')+x+' '+y+' ';
 				}
 				return d+' Z';
@@ -877,11 +963,11 @@ parent = this.holder;
 		}
 		return src;
 	}
-,	HATCH : function(ent, parent, referer) {	// provisorium only line edges !
+/* old ,	HATCH : function(ent, parent, referer) {	// provisorium only line edges !
 //	https://www.autodesk.com/techpubs/autocad/acad2000/dxf/boundary_path_data_dxf_06.htm
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDbHatch', t:[10,11,20,21,70,72,91,92,93] }
+		,	{ n:'AcDbHatch', t:['_GEOM',70,91,92,93] }	//, t:[10,11,20,21,70,72,91,92,93] }
 		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
@@ -914,16 +1000,16 @@ parent = this.holder;
 					;
 					i72+= isPolyline ? 1:0;
 					for(var i=0, dd=""; i < edges; i++) {
-						x = me.rounder( parseFloat(ent.AcDbHatch['10'][iXY+i]) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x');
-						y = me.rounder( - ( parseFloat(ent.AcDbHatch['20'][iXY+i]) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y');
+						x = me.rounder( parseFloat(ent.AcDbHatch._GEOM[iXY+i]['10']) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x');
+						y = me.rounder( - ( parseFloat(ent.AcDbHatch._GEOM[iXY+i]['20']) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y');
 						if (isPolyline) {
 							dd+= (firstM ? 'M ':'L ')+x+' '+y+' ';
 						} else {
 							var edge_type = parseFloat(a_edges_type[i72]);
 							switch(edge_type) {
 								case 1:	// line
-									x2 = me.rounder( parseFloat(ent.AcDbHatch['11'][iXY2+add1121]) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) );
-									y2 = me.rounder( - ( parseFloat(ent.AcDbHatch['21'][iXY2+add1121]) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) );
+									x2 = me.rounder( parseFloat(ent.AcDbHatch._GEOM[iXY2+add1121]['11']) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) );
+									y2 = me.rounder( - ( parseFloat(ent.AcDbHatch._GEOM[iXY2+add1121]['21']) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) );
 									dd+= (firstM ? 'M '+x+' '+y : '')+' L '+x2+' '+y2+' ';
 									add1121++;	//isLineLike = true;
 									break;
@@ -980,7 +1066,127 @@ parent = this.holder;
 			gpar.appendChild(s);
 		}
 		return src;
+	}	*/
+
+,	HATCH : function(ent, parent, referer) {	// provisorium only line edges !
+//	https://www.autodesk.com/techpubs/autocad/acad2000/dxf/boundary_path_data_dxf_06.htm
+		ent = this.structureENT(ent,[
+			{ n:'AcDbEntity', t:[8] }
+		,	{ n:'AcDbHatch', t:['_GEOM',70,91,92,93] }	//, t:[10,11,20,21,70,72,91,92,93] }
+		]);
+		var id = '_'+ent['5']
+		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
+		,	layer = ent.AcDbEntity['8']
+		,	lg = this.layer(layer,parent)
+		,	layid = lg ? lg.id : 'plain'
+		,	solid_fill_flag = ent.AcDbHatch['70']
+		,	me = this
+		
+		,	gen_path_loops = function() { 
+				var d="", dd=""	//, bulge
+				,	num_boundaries_loops = parseFloat(ent.AcDbHatch.BoundaryLoops['91'])
+				,	boundary_data = me.ensureArr(ent.AcDbHatch.BoundaryLoops.BoundaryData)
+				;
+				for(var j=0; j < num_boundaries_loops; j++) {
+					var boundary = boundary_data[j]
+					,	boundary_type = parseFloat(boundary['92'])
+					,	isPolyline = boundary_type & 2	// true = polyline
+					,	count = parseFloat(boundary['93'])
+					;
+					if (isPolyline) {
+						var bulge = parseFloat(boundary['72'])
+						,	closed = parseFloat(boundary['73'])
+						,	firstM = true;
+						;
+						for(var e=0; e<count; e++) {
+							var vertex = boundary.VERTEXES[e]
+							,	x = me.rounder( parseFloat(vertex['10']) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x')
+							,	y = me.rounder( - ( parseFloat(vertex['20']) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y')
+							,	bulgeF = parseFloat(vertex['42'])
+							,	bulge = isNaN(bulgeF) ? 0 : bulgeF
+							;
+		// TODO working with bulge !
+							dd+= (firstM ? 'M ':'L ')+x+' '+y+' ';
+							firstM = false;
+						}
+					} else {
+						var edges = me.ensureArr(boundary.Edge);
+						for(var e=0; e<count; e++) {
+							var	edge = edges[e]
+							,	edge_type = parseFloat(edge['72'])
+							;
+							switch(edge_type) {
+								case 1 : 	// line
+									var	x1 = me.rounder( parseFloat(edge['10']) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x')
+									,	y1 = me.rounder( - ( parseFloat(edge['20']) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y')
+									,	x2 = me.rounder( parseFloat(edge['11']) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x')
+									,	y2 = me.rounder( - ( parseFloat(edge['21']) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y')
+									dd+=' M '+x1+','+y1+' L '+x2+','+y2;
+									break;
+								case 2 : 	// circular arc
+									var	cx = me.rounder( parseFloat(edge['10']) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x')
+									,	cy = me.rounder( - ( parseFloat(edge['20']) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y')
+									,	r = me.rounder( parseFloat(edge['40']) )
+									,	dsa = parseFloat(edge['50'])
+									,	dea = parseFloat(edge['51'])
+									,	counterclockwise = parseFloat(edge['73'])
+									;
+									dd+= me._gen_arc_path(cx,cy,r,r,dsa,dea,counterclockwise);
+									break;
+								case 3 : 	// elliptic arc
+									var	cx = me.rounder( parseFloat(edge['10']) +(me.inserter_def ? me.inserter_def.x :0) - (referer ? 0 : me.cfg.clip_min_x) , 'x')
+									,	cy = me.rounder( - ( parseFloat(edge['20']) +(me.inserter_def ? me.inserter_def.y :0) - (referer ? 0 : me.cfg.clip_min_y) ) , 'y')
+									,	mx = me.rounder( parseFloat(edge['11']) )	// relative to center
+									,	my = me.rounder( - ( parseFloat(edge['21']) ) )	// relative to center
+									,	rx = Math.sqrt( mx*mx + my*my )
+									,	per = parseFloat(edge['40'])	// percentage of major axis
+									,	ry = rx * per
+									,	dsa = parseFloat(edge['50'])
+									,	dea = parseFloat(edge['51'])
+									,	counterclockwise = parseFloat(edge['73'])
+									dd+= me._gen_arc_path(cx,cy,rx,ry,dsa,dea,counterclockwise);
+									break;
+								case 4 : 	// spline
+			// TODO
+									break;
+							}
+						}
+					}
+					if (dd) {
+						d+= dd+" Z ";
+					}
+				}
+				return d;
+			}
+		,	d = gen_path_loops()
+		,	src = '<path id="'+ iid +'" class="pen1 l_'+layid+'" d="'+ d +'" fill="url(#diagonalHatch)"'
+				+' data-drawer="HATCH"'
+				+(referer ? ' data_referer="'+referer+'"' : '')
+				+(this.inserter_def ? ' data-inserter="'+this.inserter_def.id+'"' : '')
+				+'/>'
+		,	gpar = lg && lg.g || parent
+		;
+		if (lg) {
+			this.layer_groups[layer].src.push(src);
+		}
+		if (gpar) {
+			var s = gpar.ownerDocument.createElementNS(svgNS,'path');
+			s.setAttribute('data-drawer','HATCH');
+			s.setAttribute('d',d);
+			s.setAttribute('fill',"url(#diagonalHatch)");
+			s.setAttribute('class',"pen1 l_"+layid);
+			s.setAttribute('id',iid);
+			if (referer) {
+				s.setAttribute('data-referef',referer);
+			}
+			if (this.inserter_def) {
+				s.setAttribute('data-inserter',this.inserter_def.id);
+			}
+			gpar.appendChild(s);
+		}
+		return src;
 	}
+	
 ,	_textFormat : function( t ) {
 		var rx = /%%u(.+)/gmi
 		,	m = rx.exec(t)
@@ -993,7 +1199,7 @@ parent = this.holder;
 ,	TEXT : function(ent, parent, referer, overw) {
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDbText', t:[1,7,10,20,40,50] }
+		,	{ n:'AcDbText', t:['_GEOM',1,7,50] }	//, t:[1,7,10,20,40,50] }
 		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
@@ -1003,13 +1209,13 @@ parent = this.holder;
 		,	isAttrib = !!overw
 		
 		,	e_AcDbText = isArr(ent.AcDbText) ? ent.AcDbText[0] : ent.AcDbText
-		,	x = this.rounder( parseFloat(e_AcDbText['10']) 
+		,	x = this.rounder( parseFloat(e_AcDbText._GEOM[0]['10']) 
 				+(	(! isAttrib && this.inserter_def) ? this.inserter_def.x :0) 
 				- (referer ? 0 : this.cfg.clip_min_x) , 'x')
-		,	y = this.rounder( - ( parseFloat(e_AcDbText['20']) 
+		,	y = this.rounder( - ( parseFloat(e_AcDbText._GEOM[0]['20']) 
 				+(	(! isAttrib && this.inserter_def) ? this.inserter_def.y :0) 
 				- (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
-		,	h = parseFloat(e_AcDbText['40'])
+		,	h = parseFloat(e_AcDbText._GEOM[0]['40'])
 		,	angle = (360 - parseFloat(e_AcDbText['50'] || 0) )
 		,	t = this._textFormat(e_AcDbText['1'])
 		,	f = e_AcDbText['7'] || 'arial'	// = STANDART
@@ -1054,7 +1260,7 @@ parent = this.holder;
 ,	MTEXT : function(ent, parent, referer) {	// http://dxfwrite.readthedocs.io/en/latest/entities/mtext.html 
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDbMText', t:[1,3,7,10,20,40,50] }
+		,	{ n:'AcDbMText', t:['_GEOM',1,3,7,50] }	//, t:[1,3,7,10,20,40,50] }
 		]);
 		var id = '_'+ent['5']
 		,	iid = (this.inserter_def ? this.inserter_def.id+"_" : "") + id
@@ -1062,9 +1268,9 @@ parent = this.holder;
 		,	lg = this.layer(layer,parent)
 		,	layid = lg ? lg.id : 'plain'
 		
-		,	x = this.rounder( parseFloat(ent.AcDbMText['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
-		,	y = this.rounder( - ( parseFloat(ent.AcDbMText['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
-		,	h = parseFloat(ent.AcDbMText['40'])
+		,	x = this.rounder( parseFloat(ent.AcDbMText._GEOM[0]['10']) +(this.inserter_def ? this.inserter_def.x :0) - (referer ? 0 : this.cfg.clip_min_x) , 'x')
+		,	y = this.rounder( - ( parseFloat(ent.AcDbMText._GEOM[0]['20']) +(this.inserter_def ? this.inserter_def.y :0) - (referer ? 0 : this.cfg.clip_min_y) ) , 'y')
+		,	h = parseFloat(ent.AcDbMText._GEOM[0]['40'])
 		,	angle = (360 - parseFloat(ent.AcDbMText['50'] || 0) )
 		,	me = this
 		,	gen_texts = function( h ) {
@@ -1131,18 +1337,18 @@ this.log_missing('blok ATTRIB', ent._line_+'/'+ent._idx_, ent._name_ );
 ,	INSERT : function(ent, parent, referer) {
 		ent = this.structureENT(ent,[
 			{ n:'AcDbEntity', t:[8] }
-		,	{ n:'AcDbBlockReference', t:[2,10,20,41,42,43,50] }
+		,	{ n:'AcDbBlockReference', t:['_GEOM',2,50] }	//, t:[2,10,20,41,42,43,50] }
 		]);
 		var id = '_'+ent['5']
 		,	layer = ent.AcDbEntity['8']
 		,	lg = this.layer(layer,parent)
 		,	layid = lg ? lg.id : 'plain'
 		,	block_name = ent.AcDbBlockReference['2']
-		,	x = this.rounder( parseFloat(ent.AcDbBlockReference['10']) - (referer ? 0 : this.cfg.clip_min_x) )
-		,	y = this.rounder( - ( parseFloat(ent.AcDbBlockReference['20']) - (referer ? 0 : this.cfg.clip_min_y) ) )
+		,	x = this.rounder( parseFloat(ent.AcDbBlockReference._GEOM[0]['10']) - (referer ? 0 : this.cfg.clip_min_x) )
+		,	y = this.rounder( - ( parseFloat(ent.AcDbBlockReference._GEOM[0]['20']) - (referer ? 0 : this.cfg.clip_min_y) ) )
 	//	,	z = ent.AcDbBlockReference['30']
-		,	x_scale = parseFloat(ent.AcDbBlockReference['41'] || 1)
-		,	y_scale = parseFloat(ent.AcDbBlockReference['42'] || 1)
+		,	x_scale = parseFloat(ent.AcDbBlockReference._GEOM[0]['41'] || 1)
+		,	y_scale = parseFloat(ent.AcDbBlockReference._GEOM[0]['42'] || 1)
 	//	,	z_scale = ent.AcDbBlockReference['43'] || 1
 		,	angle = (360 - parseFloat(ent.AcDbBlockReference['50'] || 0) )
 		,	trans = 'translate('+x+','+y+') rotate('+angle+','+x+','+y+')'+' scale('+x_scale+','+y_scale+')'
@@ -1230,7 +1436,10 @@ this.log_missing(/*'a_ENTITIES'*/'ENT', i, ent._name_);
 		if (this.holder) {
 			var svgcko = this.holder.ownerSVGElement;
 			this.holder.removeAttribute('transform');
-	//		if (! svgcko.getAttribute('viewBox')) {
+			svgcko.style.backgroundColor = this.cfg.svg_bckColor;
+			if (this.cfg.svg_viewBox) {
+				svgcko.setAttribute('viewBox', this.cfg.svg_viewBox);
+			} else {
 				var wi = (this.svg_max_x - this.svg_min_x)
 				,	he = (this.svg_max_y - this.svg_min_y)
 				;
@@ -1240,7 +1449,10 @@ this.log_missing(/*'a_ENTITIES'*/'ENT', i, ent._name_);
 					+ ( wi + 2 * wi/10 ) + ' '
 					+ ( he + 2 * he/10 )
 				);
-	//		}
+			}
+			if (typeof DXFcolors != 'udefined') {
+				DXFcolors.colorize_svg(this.holder);
+			}
 			if (typeof UI != 'udefined') {
 				UI.Body.resize(this.holder);
 				UI.Layout.moveToFront(this.holder);
