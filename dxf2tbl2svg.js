@@ -11,56 +11,6 @@ Active_DXF2TBL = null;
 Active_DXFdrawerSVG = null;
 ///</section>
 
-///<section name="aliasLIBRARY" desc="LIBRARY fake aliases for autonomous functionality">
-if (typeof isDef == 'undefined') {
-	__ = undefined;
-	function getType(thing){
-		if(thing===null)return "[object Null]"; // special case
-		return Object.prototype.toString.call(thing);
-	}
-	isDef = function(thing) { return (thing !== undefined); }
-	isArr = function(thing) { return Array.isArray ? Array.isArray(thing) : getType(thing) == "[object Array]"; }
-	isFnc = function(thing) { return getType(thing) == "[object Function]"; }
-}
-if (typeof gID == 'undefined') {
-	gID = function( query ) {
-		return document.querySelector(query);
-	}
-	Node.prototype.rgID = function (query) {
-		return gID(query);
-	}
-	Node.prototype.rtgID = function (query) {
-		return gID(query);
-	}	
-}
-if (typeof gopn == 'undefined') {
-	function gopn(o, pre, r) {
-	  var a,c;
-	  r  = r || [];
-	  if ((typeof o) != "string") {
-		  try {
-		   a = Object.getOwnPropertyNames(o);
-		  } catch(e) {}
-	  }
-	  if (a) {
-		for (var i=0; i<a.length; i++) {
-			c=[];
-			if ((typeof o[a[i]]) != "string") {
-				try {
-					c = Object.getOwnPropertyNames(o[a[i]]);
-				} catch(e){}
-			}
-		  if (!c.length) {	// neukladame mena objektov
-			  r.push(pre+(pre?".":"")+a[i]);
-		  }
-		  r = gopn(o[a[i]], pre+(pre?".":"")+a[i], r);
-		}
-	  }
-	  return r;
-	}
-}
-///</section>
-
 ///<section name="TARGET" desc="LIBRARY independant target functionality">
 
 ///<class name="DXF2TBL">
@@ -182,16 +132,24 @@ DXF2TBL.prototype = {
 			return obj[name][obj[name].length-1];	// vrat posledne pridany prvok pola
 		}
 	}
-,	separate_arrays : function ( section, outer, splitCodes ) {
+,	separate_arrays : function ( section, outer, splitCodes, geoms ) {
+		outer.length = 0;
 		splitCodes = splitCodes || [0];
+		geoms = geoms || [10,11,12,13,	20,21,22,23,30,31,32,33, 40,41,42,43, 72];
 		var section_list = section.list
+		,	le = section_list.length
 		,	section_offset = section.offset
-		,	objekt, primar, geom
-		,	geoms = [10,11,12,13,	20,21,22,23,30,31,32,33, 40,41,42,43, 72]
+		,	objekt, primar, geom = null
 		,	obj_name
 		;
-		for(var i=0; i< section_list.length; i++) {	
+		for(var i=0; i< le; i++) {	
 			var gv = section_list[i];
+			if (i >= le-2) {	// remove possible ENDSEC, EOF
+				if ( (gv.gcode == 0) &&
+					( (gv.value == 'ENDSEC') || (gv.value == 'EOF') )
+				)
+					continue;
+			}
 if (i >= DEBUG_LINE_NR) {
 	debugger;	
 }
@@ -205,15 +163,16 @@ if (i >= DEBUG_LINE_NR) {
 						objekt._GEOM.push({});
 						geom = objekt._GEOM[objekt._GEOM.length-1];
 					}
-					this.add_obj( geom, gv.gcode, gv.value );					
+					this.add_obj( geom || objekt, gv.gcode, gv.value );					
 				} else {
 					this.add_obj( objekt, gv.gcode, gv.value );
 				}
 			} else {
-				if (gv.gcode == 0) {
+				if (gv.gcode == /*0*/splitCodes[0]) {
 					if (primar) {
 						outer.push(primar);
 					}
+					geom = null;
 					objekt = primar = { _name_: gv.value, _line_: section_offset + i, _idx_: i};
 				} else {
 					if (gv.gcode == 100) {
@@ -228,6 +187,9 @@ if (i >= DEBUG_LINE_NR) {
 				}
 			}
 		}	
+		if (primar) {
+			outer.push(primar);
+		}
 		return outer;
 	}
 ,	sequencer : function( section, i, primar, sequence ) {
@@ -291,16 +253,34 @@ if (i >= DEBUG_LINE_NR) {
 		return i-1;	// last was not finded
 	}
 ,	separall_arrays : function () {
-		this.a_TABLES	= [];	this.separate_arrays(this.sections.TABLES, this.a_TABLES,[0,100]);
-		this.a_BLOCKS	= [];	this.separate_arrays(this.sections.BLOCKS, this.a_BLOCKS,[0,100]);
-		this.a_ENTITIES	= [];	this.separate_arrays(this.sections.ENTITIES, this.a_ENTITIES,[0,100]);
+		this.a_HEADER	= []; if (this.sections.HEADER && this.sections.HEADER.list.length) {
+			this.separate_arrays(this.sections.HEADER, this.a_HEADER,[9,100]);
+		}
+		this.a_CLASSES	= []; if (this.sections.CLASSES && this.sections.CLASSES.list.length) {
+			this.separate_arrays(this.sections.CLASSES, this.a_CLASSES,[0,100]);
+		}
+		this.a_TABLES	= []; if (this.sections.TABLES && this.sections.TABLES.list.length) {
+			this.separate_arrays(this.sections.TABLES, this.a_TABLES,[0,100]);
+		}
+		this.a_BLOCKS	= []; if (this.sections.BLOCKS && this.sections.BLOCKS.list.length) {
+			this.separate_arrays(this.sections.BLOCKS, this.a_BLOCKS,[0,100]);
+		}
+		this.a_ENTITIES	= []; if (this.sections.ENTITIES && this.sections.ENTITIES.list.length) {
+			this.separate_arrays(this.sections.ENTITIES, this.a_ENTITIES,[0,100]);
+		}
+		this.a_OBJECTS	= []; if (this.sections.OBJECTS && this.sections.OBJECTS.list.length) {
+			this.separate_arrays(this.sections.OBJECTS, this.a_OBJECTS,[0,100],[]);
+		}
+		this.a_THUMBNAILIMAGE	= []; if (this.sections.THUMBNAILIMAGE && this.sections.THUMBNAILIMAGE.list.length) {
+			this.separate_arrays(this.sections.THUMBNAILIMAGE, this.a_THUMBNAILIMAGE,[90,100],[]);
+		}
 	}
 ,	find_handle_in_array : function ( section, id, tag, item_name, last_idx ) {
 		tag = tag || '5';	// default id
 		last_idx = parseInt(last_idx);
 		last_idx = isNaN(last_idx) ? -1 : Math.max(last_idx,-1);
 		var i,j, obj, keys
-		,	checker = new RegExp("^_(\\.([\\w\\d_]+))?\."+tag+"$","i")
+		,	checker = new RegExp("^_(\\.([\\w\\d_]+))?\\\."+tag+"$","i")
 		,	matches
 		;
 		for(i=last_idx+1; i < section.length; i++) {
@@ -322,11 +302,12 @@ if (i >= DEBUG_LINE_NR) {
 			}
 		}
 	}
-
+// D9B071D01A0C8010
 ,	make :  function( dxftxt, drawer, svg_callback ) {
 		var me = this
 		,	pxt = gID('pending_xslt_trafo')
 		;
+		this.init();
 		if (pxt) { pxt.style.display=''; }
 		setTimeout(function() {	// to update DOM
 			drawer = drawer || Active_DXFdrawerSVG || DXFdrawerSVG(me);
@@ -1450,10 +1431,10 @@ this.log_missing(/*'a_ENTITIES'*/'ENT', i, ent._name_);
 					+ ( he + 2 * he/10 )
 				);
 			}
-			if (typeof DXFcolors != 'udefined') {
+			if (typeof DXFcolors != 'undefined') {
 				DXFcolors.colorize_svg(this.holder);
 			}
-			if (typeof UI != 'udefined') {
+			if (typeof UI != 'undefined') {
 				UI.Body.resize(this.holder);
 				UI.Layout.moveToFront(this.holder);
 			}
@@ -1499,7 +1480,7 @@ this.log_missing(/*'a_ENTITIES'*/'ENT', i, ent._name_);
 */
 		svgG = svgG || this.cfg.svgG || gID(this.cfg.svgG_gID);
 		if (svgG) {
-			svgG.innerSVG = '';        // clean SVG space
+			svgG.innerHTML = '';	//innerSVG = '';        // clean SVG space
 		}
 		return svgG;
 	}

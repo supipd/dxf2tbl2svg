@@ -260,10 +260,11 @@ DXFcolors = {
 ,	layer_color : function( name, tbls) {
 		tbls = tbls || Active_DXF2TBL.a_TABLES;
 		var layer_rec = Active_DXF2TBL.a_TABLES.find(function(v) {
-			return (v._name_=='LAYER') && (name == v.AcDbLayerTableRecord['2']);
+			return (v._name_=='LAYER') 
+				&& (name == (v.AcDbLayerTableRecord ? v.AcDbLayerTableRecord['2'] : v['2']));
 		});
 		if (layer_rec) {
-			var col = parseFloat(layer_rec.AcDbLayerTableRecord['62']);
+			var col = parseFloat( layer_rec.AcDbLayerTableRecord ? layer_rec.AcDbLayerTableRecord['62'] : layer_rec['62']);
 			return {
 				rgb : this.defaults[Math.abs(col)]
 			,	display : (col >= 0) ? '' :'none'
@@ -278,7 +279,11 @@ DXFcolors = {
 				,	layInfo = DXFcolors.layer_color(name)
 				;
 	//			console.log( layInfo );
-				o.setAttribute('style','stroke:'+layInfo.rgb);
+				if (layInfo) {
+					o.setAttribute('style','stroke:'+layInfo.rgb);
+				} else {
+					console.log("layer "+name+" has not assigned color " );
+				}
 			})
 		}
 	}

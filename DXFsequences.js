@@ -174,5 +174,19 @@ DXFstructurer = {
 			]}
 		}
 	]
+,	AcDbDictionary : [
+	 	{ 100 : { d:"Subclass marker (AcDbDictionary)"
+				, n:"AcDbDictionary", fi: function(gvalue) { return gvalue=='AcDbDictionary'; }, t:[
+				{	280 : "Hard-owner flag. If set to 1, indicates that elements of the dictionary are to be treated as hardowned" }
+			,	{	281 : "Duplicate record cloning flag (determines how to merge duplicate entries): 0 = Not applicable 1 = Keep existing 2 = Use clone 3 = <xref>$0$<name> 4 = $0$<name> 5 = Unmangle name" }
+			,	{	3 : { d:"Entry name (one for each entry) (optional)"
+						, n:"Entry" , t:[
+							{	350 : "Soft-owner ID/handle to entry object (one for each entry) (optional)" }
+						,	{	360 : "Hard-pointer ownership ID/handle to entry object (one for each entry) (optional)" }
+					]}
+				}
+			]}
+		}
+	]
 }
 ///</file>
