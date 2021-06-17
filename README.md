@@ -28,7 +28,7 @@ http://www.sbmintegral.sk/TERIX/ZBM/DXF2TBL2SVG/dxf2tbl2svg_full.xhtml
 ![Help Snapshot](/scans/DXF2TBL2SVG_help.png?raw=true)
 
 Case Study which used this converter:
-http://213.151.245.228/TERIX/ZBM/uM_CaseStudy_eng.xhtml
+http://www.sbmintegral.sk//TERIX/ZBM/uM_CaseStudy_eng.xhtml
 
 TODO
 ----
